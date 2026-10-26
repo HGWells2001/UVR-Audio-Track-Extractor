@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Media;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -41,7 +42,16 @@ namespace UVRAudioTrackExtractor
         private ComboBox cmbLayout;
         private NumericUpDown numCenter;
         private TrackBar trkVoiceDb;
-        private Label lblVoiceDb;
+        private Label lblVoiceDb, lblPreviewStatus;
+        private TextBox txtPreviewPosition;
+        private Button btnPreview, btnStopPreview;
+        private SoundPlayer previewPlayer;
+        private string previewFolder;
+        private Process previewProcess;
+        private readonly object previewLock = new object();
+        private int previewGeneration;
+        private bool previewBusy;
+        private const int PreviewSeconds = 12;
         private Button btnStart, btnCancel, btnOutput, btnAuto;
         private ProgressBar progress;
         private Label lblStatus;
@@ -56,8 +66,8 @@ namespace UVRAudioTrackExtractor
             ffprobe = ffprobePath;
             Text = "UVR Audio Track Extractor V5 - Ricomponi audio 5.1";
             StartPosition = FormStartPosition.CenterParent;
-            MinimumSize = new Size(900, 680);
-            Size = new Size(1060, 810);
+            MinimumSize = new Size(980, 780);
+            Size = new Size(1120, 895);
             Font = new Font("Segoe UI", 9F);
             BackColor = Color.FromArgb(246, 248, 251);
             BuildUI();
@@ -70,11 +80,12 @@ namespace UVRAudioTrackExtractor
             root.Dock = DockStyle.Fill;
             root.Padding = new Padding(14);
             root.ColumnCount = 1;
-            root.RowCount = 7;
+            root.RowCount = 8;
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 298));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 105));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 94));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -135,6 +146,7 @@ namespace UVRAudioTrackExtractor
                 box.Dock = DockStyle.Fill;
                 box.Margin = new Padding(2, 5, 3, 2);
                 box.ReadOnly = true;
+                box.TextChanged += delegate { StopPreview(); };
                 inputBoxes[i] = box;
                 rows.Controls.Add(box, 1, i);
 
@@ -174,21 +186,22 @@ namespace UVRAudioTrackExtractor
             cmbLayout.Items.Add("5.1(side) - SL/SR");
             cmbLayout.Items.Add("5.1(back) - BL/BR");
             cmbLayout.SelectedIndex = 0;
-            cmbLayout.SelectedIndexChanged += delegate { UpdateLabels(); };
+            cmbLayout.SelectedIndexChanged += delegate { UpdateLabels(); StopPreview(); };
             opts.Controls.Add(cmbLayout);
 
             opts.Controls.Add(MakeText("FC originale:"));
             numCenter = MakeGain(1.00M);
+            numCenter.ValueChanged += delegate { StopPreview(); };
             opts.Controls.Add(numCenter);
             opts.Controls.Add(MakeText("Voce italiana:"));
             trkVoiceDb = new TrackBar();
             trkVoiceDb.Minimum = -12;
-            trkVoiceDb.Maximum = 6;
+            trkVoiceDb.Maximum = 12;
             trkVoiceDb.TickFrequency = 3;
             trkVoiceDb.SmallChange = 1;
             trkVoiceDb.LargeChange = 3;
             trkVoiceDb.Value = 6;
-            trkVoiceDb.Width = 155;
+            trkVoiceDb.Width = 185;
             trkVoiceDb.Height = 42;
             trkVoiceDb.AutoSize = false;
             trkVoiceDb.Margin = new Padding(0, 0, 0, 0);
@@ -197,7 +210,7 @@ namespace UVRAudioTrackExtractor
             lblVoiceDb.Width = 58;
             lblVoiceDb.Margin = new Padding(2, 9, 2, 2);
             opts.Controls.Add(lblVoiceDb);
-            trkVoiceDb.ValueChanged += delegate { UpdateVoiceDbLabel(); };
+            trkVoiceDb.ValueChanged += delegate { UpdateVoiceDbLabel(); StopPreview(); };
             Button clearVoice = new Button();
             clearVoice.Text = "Svuota voce";
             clearVoice.AutoSize = true;
@@ -209,10 +222,40 @@ namespace UVRAudioTrackExtractor
             note.Margin = new Padding(12, 9, 2, 0);
             opts.Controls.Add(note);
 
+            GroupBox previewGroup = new GroupBox();
+            previewGroup.Text = "3. Anteprima audio (12 secondi, ascolto stereo del mix 5.1)";
+            previewGroup.Dock = DockStyle.Fill;
+            root.Controls.Add(previewGroup, 0, 4);
+            FlowLayoutPanel previewRow = new FlowLayoutPanel();
+            previewRow.Dock = DockStyle.Fill;
+            previewRow.Padding = new Padding(10, 8, 4, 2);
+            previewRow.WrapContents = true;
+            previewGroup.Controls.Add(previewRow);
+            previewRow.Controls.Add(MakeText("Inizio (hh:mm:ss):"));
+            txtPreviewPosition = new TextBox();
+            txtPreviewPosition.Text = "00:01:00";
+            txtPreviewPosition.Width = 85;
+            txtPreviewPosition.Margin = new Padding(0, 5, 10, 0);
+            txtPreviewPosition.TextChanged += delegate { StopPreview(); };
+            previewRow.Controls.Add(txtPreviewPosition);
+            btnPreview = new Button();
+            btnPreview.Text = "Ascolta anteprima";
+            btnPreview.AutoSize = true;
+            btnPreview.Click += StartPreview;
+            previewRow.Controls.Add(btnPreview);
+            btnStopPreview = new Button();
+            btnStopPreview.Text = "Ferma audio";
+            btnStopPreview.AutoSize = true;
+            btnStopPreview.Enabled = false;
+            btnStopPreview.Click += delegate { StopPreview(); };
+            previewRow.Controls.Add(btnStopPreview);
+            lblPreviewStatus = MakeText("Seleziona un punto del film. Non modifica i sorgenti.");
+            previewRow.Controls.Add(lblPreviewStatus);
+
             GroupBox targetGroup = new GroupBox();
-            targetGroup.Text = "3. File audio 5.1 da creare (WAV 24 bit, FLAC 24 bit o AC3 640 kbps)";
+            targetGroup.Text = "4. File audio 5.1 da creare (WAV 24 bit, FLAC 24 bit o AC3 640 kbps)";
             targetGroup.Dock = DockStyle.Fill;
-            root.Controls.Add(targetGroup, 0, 4);
+            root.Controls.Add(targetGroup, 0, 5);
             TableLayoutPanel target = new TableLayoutPanel();
             target.Dock = DockStyle.Fill;
             target.Padding = new Padding(8, 8, 8, 8);
@@ -238,7 +281,7 @@ namespace UVRAudioTrackExtractor
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
-            root.Controls.Add(actions, 0, 5);
+            root.Controls.Add(actions, 0, 6);
             btnStart = new Button();
             btnStart.Text = "RICOMPONI AUDIO 5.1";
             btnStart.Dock = DockStyle.Fill;
@@ -269,7 +312,7 @@ namespace UVRAudioTrackExtractor
             GroupBox logs = new GroupBox();
             logs.Text = "Registro operazioni";
             logs.Dock = DockStyle.Fill;
-            root.Controls.Add(logs, 0, 6);
+            root.Controls.Add(logs, 0, 7);
             txtLog = new TextBox();
             txtLog.Dock = DockStyle.Fill;
             txtLog.Multiline = true;
@@ -281,6 +324,7 @@ namespace UVRAudioTrackExtractor
             logs.Controls.Add(txtLog);
 
             FormClosing += delegate(object sender, FormClosingEventArgs e) {
+                StopPreview();
                 if (!busy) return;
                 DialogResult result = MessageBox.Show(
                     "Annullare la ricomposizione, cancellare i temporanei e chiudere?",
@@ -585,14 +629,19 @@ namespace UVRAudioTrackExtractor
 
         private string MakeFFmpegArgs(List<Source> sources, string staging, string stagedOutput,
                                       string extension, double duration, bool back,
-                                      decimal centerGain, decimal voiceGain)
+                                      decimal centerGain, decimal voiceGain,
+                                      bool preview = false, double previewStart = 0)
         {
             StringBuilder args = new StringBuilder();
             // Un solo thread per il grafo evita troncamenti sporadici di pochi
             // millisecondi osservati con join + FLAC su alcune versioni FFmpeg.
-            args.Append("-hide_banner -loglevel error -nostdin -nostats -filter_complex_threads 1 -progress pipe:1 -n ");
+            args.Append("-hide_banner -loglevel error -nostdin -nostats -filter_complex_threads 1 ");
+            args.Append(preview ? "-y " : "-progress pipe:1 -n ");
             for (int i = 0; i < sources.Count; i++) {
                 Source s = sources[i];
+                if (preview)
+                    args.Append("-ss ").Append(Number(previewStart)).Append(" -t ")
+                        .Append(Number(duration)).Append(" ");
                 if (s.IsChunks) {
                     string concat = MakeConcatFile(s, staging, i);
                     args.Append("-f concat -safe 0 -i ").Append(Quote(concat)).Append(" ");
@@ -631,10 +680,22 @@ namespace UVRAudioTrackExtractor
                 if (i > 0) filter.Append("|");
                 filter.Append(i).Append("-").Append(channels[i]);
             }
-            filter.Append(":channel_layout=").Append(layout).Append("[out]");
+            filter.Append(":channel_layout=").Append(layout);
+            if (preview) {
+                // L'anteprima riproduce lo stesso mix e lo converte in stereo
+                // con pesi conservativi per ascoltarlo anche su un PC non 5.1.
+                string leftSurround = back ? "BL" : "SL";
+                string rightSurround = back ? "BR" : "SR";
+                filter.Append("[surround];[surround]pan=stereo|c0=0.55*FL+0.38*FC+0.25*")
+                      .Append(leftSurround).Append("+0.08*LFE|c1=0.55*FR+0.38*FC+0.25*")
+                      .Append(rightSurround)
+                      .Append("+0.08*LFE,alimiter=limit=0.95:latency=1[out]");
+            } else filter.Append("[out]");
             args.Append("-filter_complex ").Append(Quote(filter.ToString()))
-                .Append(" -map ").Append(Quote("[out]")).Append(" -ar 48000 ");
-            if (extension == ".wav") args.Append("-c:a pcm_s24le ");
+                .Append(" -map ").Append(Quote("[out]"))
+                .Append(" -ar 48000 ");
+            if (preview) args.Append("-c:a pcm_s16le -ac 2 ");
+            else if (extension == ".wav") args.Append("-c:a pcm_s24le ");
             else if (extension == ".flac")
                 args.Append("-c:a flac -sample_fmt s32 -bits_per_raw_sample 24 -compression_level 8 ");
             else if (extension == ".ac3") args.Append("-c:a ac3 -b:a 640k ");
@@ -650,9 +711,182 @@ namespace UVRAudioTrackExtractor
                 ? parsed.TotalSeconds : 0;
         }
 
+
+        private static double ParsePreviewPosition(string text)
+        {
+            string[] parts = text.Trim().Split(':');
+            if (parts.Length != 3)
+                throw new FormatException("Inserisci il punto d'inizio come hh:mm:ss (es. 01:28:53).");
+            int hours, minutes, seconds;
+            if (!int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out hours) ||
+                !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out minutes) ||
+                !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out seconds) ||
+                hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59)
+                throw new FormatException("Orario non valido. Usa hh:mm:ss (es. 01:28:53).");
+            return new TimeSpan(hours, minutes, seconds).TotalSeconds;
+        }
+
+        // Cancella l'anteprima precedente, anche durante la generazione.
+        // Chiamato solo dal thread dell'interfaccia; la generazione e' in background.
+        private void StopPreview()
+        {
+            Interlocked.Increment(ref previewGeneration);
+            lock (previewLock) {
+                try {
+                    if (previewProcess != null && !previewProcess.HasExited)
+                        previewProcess.Kill();
+                } catch (Exception) { }
+            }
+            if (previewPlayer != null) {
+                try { previewPlayer.Stop(); previewPlayer.Dispose(); } catch (Exception) { }
+                previewPlayer = null;
+            }
+            if (previewFolder != null) {
+                DeletePreviewFolder(previewFolder);
+                previewFolder = null;
+            }
+            previewBusy = false;
+            if (btnPreview != null) btnPreview.Enabled = !busy;
+            if (btnStopPreview != null) btnStopPreview.Enabled = false;
+            if (lblPreviewStatus != null) lblPreviewStatus.Text = "Pronto per una nuova anteprima.";
+        }
+
+        private static void DeletePreviewFolder(string folder)
+        {
+            try { if (folder != null && Directory.Exists(folder)) Directory.Delete(folder, true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        private void StartPreview(object sender, EventArgs e)
+        {
+            if (busy || previewBusy) return;
+            double start;
+            try { start = ParsePreviewPosition(txtPreviewPosition.Text); }
+            catch (FormatException ex) {
+                MessageBox.Show(ex.Message, "Punto d'inizio anteprima", MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning);
+                return;
+            }
+            string[] paths = inputBoxes.Select(t => t.Text.Trim()).ToArray();
+            if (paths.Take(6).Any(string.IsNullOrEmpty)) {
+                MessageBox.Show("Seleziona i 6 canali (FL, FR, FC, LFE e surround) per ascoltare il mix.",
+                    "Anteprima", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            StopPreview();
+            int job = Interlocked.Increment(ref previewGeneration);
+            decimal centerGain = numCenter.Value;
+            decimal voiceGain = (decimal)Math.Pow(10.0, trkVoiceDb.Value / 20.0);
+            bool back = cmbLayout.SelectedIndex == 1;
+            previewBusy = true;
+            btnPreview.Enabled = false;
+            btnStopPreview.Enabled = true;
+            lblPreviewStatus.Text = "Preparazione dell'estratto in corso...";
+            Thread worker = new Thread(delegate {
+                GeneratePreview(job, paths, start, back, centerGain, voiceGain);
+            });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        private void GeneratePreview(int job, string[] paths, double start, bool back,
+                                     decimal centerGain, decimal voiceGain)
+        {
+            string folder = null;
+            try {
+                if (job != Volatile.Read(ref previewGeneration)) return;
+                string[] names = back
+                    ? new string[] { "FL", "FR", "FC", "LFE", "BL", "BR", "VOCE" }
+                    : new string[] { "FL", "FR", "FC", "LFE", "SL", "SR", "VOCE" };
+                List<Source> sources = new List<Source>();
+                for (int i = 0; i < paths.Length; i++) {
+                    if (i == 6 && string.IsNullOrWhiteSpace(paths[i])) continue;
+                    sources.Add(LoadSource(paths[i], names[i]));
+                }
+                folder = Path.Combine(Path.GetTempPath(), "UVR_PREVIEW_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(folder);
+                string wave = Path.Combine(folder, "anteprima_stereo.wav");
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = ffmpeg;
+                psi.Arguments = MakeFFmpegArgs(sources, folder, wave, ".wav", PreviewSeconds,
+                                                back, centerGain, voiceGain, true, start);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardError = true;
+                psi.RedirectStandardOutput = true;
+                string error;
+                using (Process proc = new Process()) {
+                    proc.StartInfo = psi;
+                    proc.Start();
+                    lock (previewLock) {
+                        previewProcess = proc;
+                        if (job != Volatile.Read(ref previewGeneration)) {
+                            try { proc.Kill(); } catch (Exception) { }
+                        }
+                    }
+                    try {
+                        // L'anteprima non usa -progress: stderr contiene solo gli errori.
+                        error = proc.StandardError.ReadToEnd();
+                        proc.StandardOutput.ReadToEnd();
+                        proc.WaitForExit();
+                        if (job != Volatile.Read(ref previewGeneration)) return;
+                        if (proc.ExitCode != 0)
+                            throw new IOException("FFmpeg (anteprima): " + error);
+                    } finally {
+                        lock (previewLock) {
+                            if (previewProcess == proc) previewProcess = null;
+                        }
+                    }
+                }
+                if (!File.Exists(wave) || new FileInfo(wave).Length < 4096)
+                    throw new IOException("L'anteprima audio non e' stata prodotta correttamente.");
+                string readyFolder = folder;
+                OnUI(delegate {
+                    if (job != Volatile.Read(ref previewGeneration)) {
+                        DeletePreviewFolder(readyFolder);
+                        return;
+                    }
+                    try {
+                        SoundPlayer player = new SoundPlayer(Path.Combine(readyFolder, "anteprima_stereo.wav"));
+                        player.Load();
+                        previewPlayer = player;
+                        previewFolder = readyFolder;
+                        player.Play();
+                        previewBusy = false;
+                        btnPreview.Enabled = true;
+                        btnStopPreview.Enabled = true;
+                        lblPreviewStatus.Text = "Riproduzione stereo: " + PreviewSeconds + " s (mix 5.1).";
+                    } catch (Exception ex) {
+                        previewBusy = false;
+                        btnPreview.Enabled = true;
+                        btnStopPreview.Enabled = false;
+                        DeletePreviewFolder(readyFolder);
+                        MessageBox.Show(ex.Message, "Riproduzione anteprima", MessageBoxButtons.OK,
+                                        MessageBoxIcon.Error);
+                    }
+                });
+                folder = null; // La cartella passa al player, che la elimina con Ferma audio.
+            } catch (Exception ex) {
+                string failure = ex.Message;
+                OnUI(delegate {
+                    if (job != Volatile.Read(ref previewGeneration)) return;
+                    previewBusy = false;
+                    btnPreview.Enabled = true;
+                    btnStopPreview.Enabled = false;
+                    lblPreviewStatus.Text = "Impossibile preparare l'anteprima.";
+                    MessageBox.Show(failure, "Anteprima audio", MessageBoxButtons.OK,
+                                    MessageBoxIcon.Error);
+                });
+            } finally {
+                if (folder != null) DeletePreviewFolder(folder);
+            }
+        }
+
         private void StartRecompose(object sender, EventArgs e)
         {
             if (busy) return;
+            StopPreview();
             string[] paths = inputBoxes.Select(t => t.Text.Trim()).ToArray();
             if (paths.Take(6).Any(string.IsNullOrEmpty)) {
                 MessageBox.Show("Seleziona FL, FR, FC, LFE e i due canali surround.", "Sorgenti mancanti");
@@ -684,6 +918,7 @@ namespace UVRAudioTrackExtractor
             btnCancel.Enabled = true;
             btnOutput.Enabled = false;
             btnAuto.Enabled = false;
+            btnPreview.Enabled = false;
             progress.Value = 0;
             lblStatus.Text = "Verifica sorgenti...";
             Thread worker = new Thread(delegate() {
@@ -818,6 +1053,7 @@ namespace UVRAudioTrackExtractor
                     btnCancel.Enabled = false;
                     btnOutput.Enabled = true;
                     btnAuto.Enabled = true;
+                    btnPreview.Enabled = true;
                     if (finalError != null) {
                         lblStatus.Text = "Errore";
                         Log("ERRORE: " + finalError);

@@ -28,7 +28,7 @@ Non confondere i due layout: devi scegliere quello corrispondente alle sorgenti.
    scegli i canali manualmente.
 4. Facoltativo: scegli la sorgente **VOCE ITA** per inserirla nel centrale.
    Il controllo **FC originale** regola il volume del centrale (1,00 = invariato).
-   Lo **slider Voce italiana** regola il doppiaggio da -12 a +6 dB e parte
+   Lo **slider Voce italiana** regola il doppiaggio da -12 a +12 dB e parte
    da **+6 dB**. Lo slider agisce soltanto se hai scelto VOCE ITA;
    non altera direttamente un FLAC 5.1 gia' prodotto. Nel mix viene applicato
    un limiter al centrale per contenere i picchi.
@@ -74,7 +74,7 @@ downmix mono di WAV stereo in ingresso e la conversione a 48 kHz).
 
 Con VOCE ITA, il programma:
 - riduce/aumenta il centrale secondo il valore **FC originale**;
-- riduce/aumenta la voce secondo lo slider **Voce italiana** (-12 / +6 dB,
+- riduce/aumenta la voce secondo lo slider **Voce italiana** (-12 / +12 dB,
   valore iniziale +6 dB, pari a circa 1,995 volte l'ampiezza);
 - miscela i due segnali nel solo FC e limita i picchi;
 - conserva FL, FR, LFE, SL, SR separati.
@@ -134,3 +134,20 @@ Per spostare l'app su un altro computer offline, copia tutta la cartella `dist`.
 chunk concatenati, mix voce, FLAC/WAV/AC3, layout 5.1(side)/5.1(back).
 **La compilazione Windows Forms non e' stata eseguita in questo ambiente**:
 se `COMPILA_EXE.bat` segnala un errore, invia il testo della console.
+
+## Anteprima audio della ricomposizione 5.1
+
+In **Ricomponi audio 5.1**, seleziona i sei canali (ed eventualmente la voce italiana),
+regola lo slider della voce da **-12 a +12 dB** (predefinito **+6 dB**),
+poi inserisci un punto in **hh:mm:ss**, ad esempio `01:28:53`.
+Premi **Ascolta anteprima** per generare un estratto di **12 secondi** del mix 5.1
+convertito in stereo e riprodurlo sul PC. Premi **Ferma audio** per interrompere
+l'ascolto. Cambiare un ingresso, il layout, il guadagno del centrale o lo slider
+interrompe la vecchia anteprima, per evitare di ascoltare impostazioni non aggiornate.
+Non e' richiesto un percorso di uscita e non vengono modificati i file originali.
+La generazione puo' impiegare piu' tempo quando le sorgenti sono cartelle di molti chunk.
+
+**Nota:** l'anteprima e' un downmix stereo per ascolto, mentre il file finale resta
+un vero 5.1 con il layout selezionato. Il limiter presente nel mix protegge il
+canale centrale, ma **+12 dB puo' produrre un risultato troppo forte o distorto**:
+ascolta l'anteprima e riduci il guadagno se necessario.

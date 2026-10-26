@@ -5,7 +5,8 @@ Windows Forms application for offline extraction of audio tracks and reconstruct
 - Extract tracks from video, split channels, and optionally create chunks for UVR.
 - Recompose **FL / FR / FC / LFE / SL / SR** into WAV, FLAC or AC3.
 - Supports 5.1(side) and 5.1(back) layouts.
-- Optionally mix **Italian dialogue into the center channel**, with a **-12 to +6 dB voice slider** (default **+6 dB**).
+- Optionally mix **Italian dialogue into the center channel**, with a **-12 to +12 dB voice slider** (default **+6 dB**).
+- Preview 12 seconds of the 5.1 mix as a temporary stereo WAV at a chosen `hh:mm:ss` position (listen/stop; no source changes).
 - No Internet connection required at runtime. FFmpeg and FFprobe must be on the PATH or in `dist/bin`.
 
 ## Build (Windows 10/11)

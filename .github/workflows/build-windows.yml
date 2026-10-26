@@ -1,0 +1,30 @@
+name: Build Windows application
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Windows Forms application (.NET Framework)
+        shell: pwsh
+        run: |
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) {
+            $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
+          }
+          if (-not (Test-Path $csc)) { throw 'NET Framework 4.x C# compiler not found' }
+          New-Item -ItemType Directory -Path 'dist' -Force | Out-Null
+          & $csc /nologo /target:winexe /optimize+ /platform:anycpu '/out:dist\UVR_Audio_Track_Extractor.exe' /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll UVR_Audio_Track_Extractor.cs RecomposeForm.cs
+          if ($LASTEXITCODE -ne 0) { throw "C# compilation failed (exit $LASTEXITCODE)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UVR-Audio-Track-Extractor-Windows
+          path: dist/UVR_Audio_Track_Extractor.exe

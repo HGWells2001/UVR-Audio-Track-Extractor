@@ -783,9 +783,11 @@ namespace UVRAudioTrackExtractor
             btnPreview.Enabled = false;
             btnStopPreview.Enabled = true;
             lblPreviewStatus.Text = "Preparazione dell'estratto in corso...";
-            Thread worker = new Thread(delegate {
+            // Specifica ThreadStart: il compilatore .NET Framework altrimenti
+            // trova ambigua la scelta fra ThreadStart e ParameterizedThreadStart.
+            Thread worker = new Thread(new ThreadStart(delegate {
                 GeneratePreview(job, paths, start, back, centerGain, voiceGain);
-            });
+            }));
             worker.IsBackground = true;
             worker.Start();
         }

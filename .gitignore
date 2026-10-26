@@ -1,0 +1,19 @@
+# Build outputs and downloaded FFmpeg tools
+dist/
+bin/
+obj/
+*.exe
+*.pdb
+*.dll
+*.log
+*.binlog
+*.user
+.vs/
+.vscode/
+# Generated audio and temporary staging folders
+*.wav
+*.flac
+*.ac3
+*.mkv
+*.mp4
+.UVR_RICOMPONE_TEMP_*/
